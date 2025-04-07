@@ -1,0 +1,5 @@
+# For older versions
+id "com.android.application" version "8.1.0" apply
+
+Replaced by (for new versions)
+id "com.android.application" version "8.2.1" apply false
