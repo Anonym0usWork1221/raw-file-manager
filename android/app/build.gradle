@@ -7,7 +7,7 @@ plugins {
 
 android {
     namespace = "com.jara.manager.raw_file_manager"
-    compileSdk = 35compileSdk = 35
+    compileSdk = 35
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
