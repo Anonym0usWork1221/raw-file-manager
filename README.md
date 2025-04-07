@@ -31,43 +31,43 @@
 ## Screenshots
 
 ### Home Screen
-![Home Screen](screenshots/home_page.png)
+<img src="screenshots/home_page.png" alt="Home Screen" width="600">
 *The main interface for quick access to your files and folders.*
 
 ### Navigation Bar
-![Navigation Bar](screenshots/nav_bar.png)
+<img src="screenshots/nav_bar.png" alt="Navigation Bar" width="600">
 *Easily navigate through directories with the intuitive navigation bar.*
 
 ### File and Folder Creation
-![File Creation](screenshots/file_creations.png)
+<img src="screenshots/file_creations.png" alt="File Creation" width="600">
 *Create new files or folders in any directory.*
 
 ### Multiple Deletions
-![Multiple Deletions](screenshots/multiple_deletions.png)
+<img src="screenshots/multiple_deletions.png" alt="Multiple Deletions" width="600">
 *Select and delete multiple files or folders at once.*
 
 ### File Actions
-![File Actions](screenshots/actions.png)
+<img src="screenshots/actions.png" alt="File Actions" width="600">
 *Perform actions like delete, move, zip, and more.*
 
 ### Recycle Bin
-![Recycle Bin](screenshots/recycle_bin.png)
+<img src="screenshots/recycle_bin.png" alt="Recycle Bin" width="600">
 *Recover deleted files from the Recycle Bin.*
 
 ### Search Functionality
-![Search](screenshots/searching.png)
+<img src="screenshots/searching.png" alt="Search" width="600">
 *Quickly find files or folders using the search feature.*
 
 ### Sorting Options
-![Sorting](screenshots/sorting.png)
+<img src="screenshots/sorting.png" alt="Sorting" width="600">
 *Sort files and folders by name, date, size, or type.*
 
 ### Built-in Text Editor
-![Text Editor](screenshots/text_editor.png)
+<img src="screenshots/text_editor.png" alt="Text Editor" width="600">
 *Edit text files directly within the app.*
 
 ### Zip/Unzip Features
-![Zip/Unzip](screenshots/zip_unzip_features.png)
+<img src="screenshots/zip_unzip_features.png" alt="Zip/Unzip" width="600">
 *Compress files into ZIP archives or extract them with ease.*
 
 ---
@@ -75,14 +75,14 @@
 ## Installation
 
 ### Option 1: Install the APK
-1. Download the latest APK from the [Releases](https://github.com/your-repo/raw-file-manager/releases) section.
+1. Download the latest APK from the [Releases](https://github.com/Anonym0usWork1221/raw-file-manager/releases) section.
 2. Enable "Install from Unknown Sources" in your device settings.
 3. Open the downloaded APK and follow the installation prompts.
 
 ### Option 2: Build from Source
 1. Clone the repository:
    bash
-   git clone https://github.com/your-repo/raw-file-manager.git
+   git clone https://github.com/Anonym0usWork1221/raw-file-manager.git
 
 2. Open the project in Android Studio.
 3. Sync the Gradle files and ensure all dependencies are installed.
@@ -121,7 +121,7 @@
 
 ### Cloning the Repository
 bash
-git clone https://github.com/your-repo/raw-file-manager.git
+git clone https://github.com/Anonym0usWork1221/raw-file-manager.git
 cd raw-file-manager
 
 
@@ -154,7 +154,7 @@ cd raw-file-manager
 ## Contributing
 
 We welcome contributions from the community!
-Please read our [Contributing Guidelines](https://github.com/your-repo/raw-file-manager/CONTRIBUTING.md) before submitting a pull request.
+Please read our [Contributing Guidelines](https://github.com/Anonym0usWork1221/raw-file-manager/CONTRIBUTING.md) before submitting a pull request.
 
 ---
 
@@ -166,8 +166,7 @@ This project is licensed under the MIT License. See the [LICENSE](LICENSE) file 
 
 ## Contact / Community
 
-- **GitHub Issues**: [Report issues](https://github.com/your-repo/raw-file-manager/issues)
-- **Email**: support@rawfilemanager.com
-- **Community Forum**: [Join the discussion](https://community.rawfilemanager.com)
+- **GitHub Issues**: [Report issues](https://github.com/Anonym0usWork1221/raw-file-manager/issues)
+- **Email**: abdulmoez123456789@gmail.com
 
 ---
