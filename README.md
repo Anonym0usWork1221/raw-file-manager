@@ -31,44 +31,44 @@
 ## Screenshots
 
 ### Home Screen
+* The main interface for quick access to your files and folders.
 <img src="screenshots/home_page.png" alt="Home Screen" width="600">
-*The main interface for quick access to your files and folders.*
 
 ### Navigation Bar
-<img src="screenshots/nav_bar.png" alt="Navigation Bar" width="600">
-*Easily navigate through directories with the intuitive navigation bar.*
+* Easily navigate through directories with the intuitive navigation bar.
+  <img src="screenshots/nav_bar.png" alt="Navigation Bar" width="600">
 
 ### File and Folder Creation
+* Create new files or folders in any directory.
 <img src="screenshots/file_creations.png" alt="File Creation" width="600">
-*Create new files or folders in any directory.*
 
 ### Multiple Deletions
+* Select and delete multiple files or folders at once.
 <img src="screenshots/multiple_deletions.png" alt="Multiple Deletions" width="600">
-*Select and delete multiple files or folders at once.*
 
 ### File Actions
+* Perform actions like delete, move, zip, and more.
 <img src="screenshots/actions.png" alt="File Actions" width="600">
-*Perform actions like delete, move, zip, and more.*
 
 ### Recycle Bin
+* Recover deleted files from the Recycle Bin.
 <img src="screenshots/recycle_bin.png" alt="Recycle Bin" width="600">
-*Recover deleted files from the Recycle Bin.*
 
 ### Search Functionality
+* Quickly find files or folders using the search feature.
 <img src="screenshots/searching.png" alt="Search" width="600">
-*Quickly find files or folders using the search feature.*
 
 ### Sorting Options
+* Sort files and folders by name, date, size, or type.
 <img src="screenshots/sorting.png" alt="Sorting" width="600">
-*Sort files and folders by name, date, size, or type.*
 
 ### Built-in Text Editor
+* Edit text files directly within the app.
 <img src="screenshots/text_editor.png" alt="Text Editor" width="600">
-*Edit text files directly within the app.*
 
 ### Zip/Unzip Features
-<img src="screenshots/zip_unzip_features.png" alt="Zip/Unzip" width="600">
-*Compress files into ZIP archives or extract them with ease.*
+* Compress files into ZIP archives or extract them with ease.
+<img src="screenshots/zip_unzip_features.png" alt="Zip/Unzip" width="600" height="800">
 
 ---
 
