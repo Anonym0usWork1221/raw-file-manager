@@ -32,43 +32,43 @@
 
 ### Home Screen
 * The main interface for quick access to your files and folders.
-<img src="screenshots/home_page.png" alt="Home Screen" width="600">
+<img src="screenshots/home_page.png" alt="Home Screen" width="600" height="1000">
 
 ### Navigation Bar
 * Easily navigate through directories with the intuitive navigation bar.
-  <img src="screenshots/nav_bar.png" alt="Navigation Bar" width="600">
+  <img src="screenshots/nav_bar.png" alt="Navigation Bar" width="600" height="1000">
 
 ### File and Folder Creation
 * Create new files or folders in any directory.
-<img src="screenshots/file_creations.png" alt="File Creation" width="600">
+<img src="screenshots/file_creations.png" alt="File Creation" width="600" height="1000">
 
 ### Multiple Deletions
 * Select and delete multiple files or folders at once.
-<img src="screenshots/multiple_deletions.png" alt="Multiple Deletions" width="600">
+<img src="screenshots/multiple_deletions.png" alt="Multiple Deletions" width="600" height="1000"> 
 
 ### File Actions
 * Perform actions like delete, move, zip, and more.
-<img src="screenshots/actions.png" alt="File Actions" width="600">
+<img src="screenshots/actions.png" alt="File Actions" width="600" height="1000">
 
 ### Recycle Bin
 * Recover deleted files from the Recycle Bin.
-<img src="screenshots/recycle_bin.png" alt="Recycle Bin" width="600">
+<img src="screenshots/recycle_bin.png" alt="Recycle Bin" width="600" height="1000">
 
 ### Search Functionality
 * Quickly find files or folders using the search feature.
-<img src="screenshots/searching.png" alt="Search" width="600">
+<img src="screenshots/searching.png" alt="Search" width="600" height="1000">
 
 ### Sorting Options
 * Sort files and folders by name, date, size, or type.
-<img src="screenshots/sorting.png" alt="Sorting" width="600">
+<img src="screenshots/sorting.png" alt="Sorting" width="600" height="1000">
 
 ### Built-in Text Editor
 * Edit text files directly within the app.
-<img src="screenshots/text_editor.png" alt="Text Editor" width="600">
+<img src="screenshots/text_editor.png" alt="Text Editor" width="600" height="1000">
 
 ### Zip/Unzip Features
 * Compress files into ZIP archives or extract them with ease.
-<img src="screenshots/zip_unzip_features.png" alt="Zip/Unzip" width="600" height="800">
+<img src="screenshots/zip_unzip_features.png" alt="Zip/Unzip" width="600" height="1000">
 
 ---
 
