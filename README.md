@@ -148,11 +148,11 @@
 
 ---
 
-## Contributing
+## Contributor
 
-We welcome contributions from the community!
-Please read our [Contributing Guidelines](https://github.com/Anonym0usWork1221/raw-file-manager/CONTRIBUTING.md) before submitting a pull request.
-
+<a href = "https://github.com/Anonym0usWork1221/raw-file-manager/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=Anonym0usWork1221/raw-file-manager" alt="Contributors"/>
+</a>
 ---
 
 ## License
