@@ -4,7 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:path/path.dart' as path;
 import 'package:permission_handler/permission_handler.dart';
 import 'package:device_info_plus/device_info_plus.dart';
-import 'package:archive/archive_io.dart';
+import 'package:archive/archive_io.dart' hide ZipFile;
 import 'package:open_file/open_file.dart';
 import 'package:raw_file_manager/widgets/expressive_refresh.dart';
 import 'package:share_plus/share_plus.dart';
@@ -14,6 +14,7 @@ import '../services/deletion_service.dart';
 import '../utils/file_utils.dart';
 import 'file_editor_page.dart';
 import 'preview_page.dart';
+import 'package:flutter_archive/flutter_archive.dart';
 import 'text_preview_page.dart';
 import 'secure_file_preview_page.dart';
 import 'package:raw_file_manager/widgets/widgets.dart';
@@ -393,12 +394,11 @@ class HomePageState extends State<HomePage> with TickerProviderStateMixin {
           )),
     ]);
 
-    // 菜单贴在按钮右下角
     showMenu<String>(
       context: context,
       position: RelativeRect.fromLTRB(
-        buttonX + 40, // 按钮X
-        buttonY + 40, // 按钮Y
+        buttonX + 40,
+        buttonY + 40,
         MediaQuery.of(context).size.width - (buttonX + 40),
         MediaQuery.of(context).size.height - (buttonY + 40),
       ),
@@ -407,14 +407,9 @@ class HomePageState extends State<HomePage> with TickerProviderStateMixin {
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.all(Radius.circular(24))),
       clipBehavior: Clip.antiAlias,
-
-      
       popUpAnimationStyle: const AnimationStyle(
-        
         duration: Duration(milliseconds: 400),
-        
         curve: Curves.decelerate,
-        
         reverseCurve: Curves.decelerate,
       ),
     ).then((value) {
@@ -851,52 +846,90 @@ class HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   Future<void> _zipFileOrFolder(FileSystemEntity entity) async {
-    try {
-      String defaultName = path.basename(entity.path);
-      String? enteredName = await _askZipName(defaultName);
-      if (enteredName == null || enteredName.trim().isEmpty) {
-        enteredName = defaultName;
+    // try {
+    //   String defaultName = path.basename(entity.path);
+    //   String? enteredName = await _askZipName(defaultName);
+    //   if (enteredName == null || enteredName.trim().isEmpty) {
+    //     enteredName = defaultName;
+    //   }
+    //   String zipPath = path.join(path.dirname(entity.path), "$enteredName.zip");
+    //   var encoder = ZipFileEncoder();
+    //   encoder.create(zipPath);
+    //   if (entity is File) {
+    //     encoder.addFile(entity);
+    //   } else if (entity is Directory) {
+    //     encoder.addDirectory(entity);
+    //   }
+    //   encoder.close();
+    //   ScaffoldMessenger.of(context)
+    //       .showSnackBar(SnackBar(content: Text("Created zip at $zipPath")));
+    //   _listFiles();
+    // } catch (e) {
+    //   print("Error zipping: $e");
+    // }
+
+    String defaultName = path.basename(entity.path);
+    String? enteredName = await _askZipName(defaultName);
+    if (enteredName == null || enteredName.trim().isEmpty) {
+      enteredName = defaultName;
+    }
+
+    if (entity is File) {
+      final dataDir = Directory(entity.parent.path);
+      final zipFile = File(path.join(entity.parent.path, "$enteredName.zip"));
+      final files = [File(entity.path)];
+      try {
+        ZipFile.createFromFiles(
+            sourceDir: dataDir, files: files, zipFile: zipFile);
+      } catch (e) {
+        print(e);
       }
-      String zipPath = path.join(path.dirname(entity.path), "$enteredName.zip");
-      var encoder = ZipFileEncoder();
-      encoder.create(zipPath);
-      if (entity is File) {
-        encoder.addFile(entity);
-      } else if (entity is Directory) {
-        encoder.addDirectory(entity);
+    } else if (entity is Directory) {
+      final dataDir = Directory(entity.path);
+      try {
+        final zipFile = File(path.join(entity.path, "$enteredName.zip"));
+        await ZipFile.createFromDirectory(
+            sourceDir: dataDir, zipFile: zipFile, recurseSubDirs: true);
+        _listFiles();
+      } catch (e) {
+        print(e);
       }
-      encoder.close();
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text("Created zip at $zipPath")));
-      _listFiles();
-    } catch (e) {
-      print("Error zipping: $e");
     }
   }
 
   Future<void> _unzipFile(FileSystemEntity entity) async {
+    // try {
+    //   if (entity is File) {
+    //     String targetDir = entity.parent.path;
+    //     List<int> bytes = await entity.readAsBytes();
+    //     Archive archive = ZipDecoder().decodeBytes(bytes);
+    //     for (var file in archive) {
+    //       String filename = path.join(targetDir, file.name);
+    //       if (file.isFile) {
+    //         File outFile = File(filename);
+    //         await outFile.create(recursive: true);
+    //         await outFile.writeAsBytes(file.content as List<int>);
+    //       } else {
+    //         Directory dir = Directory(filename);
+    //         await dir.create(recursive: true);
+    //       }
+    //     }
+    //     ScaffoldMessenger.of(context)
+    //         .showSnackBar(SnackBar(content: Text("Unzipped to $targetDir")));
+    //     _listFiles();
+    //   }
+    // } catch (e) {
+    //   print("Error unzipping: $e");
+    // }
+
+    final zipFile = File(entity.path);
+    final destinationDir = Directory(entity.parent.path);
     try {
-      if (entity is File) {
-        String targetDir = entity.parent.path;
-        List<int> bytes = await entity.readAsBytes();
-        Archive archive = ZipDecoder().decodeBytes(bytes);
-        for (var file in archive) {
-          String filename = path.join(targetDir, file.name);
-          if (file.isFile) {
-            File outFile = File(filename);
-            await outFile.create(recursive: true);
-            await outFile.writeAsBytes(file.content as List<int>);
-          } else {
-            Directory dir = Directory(filename);
-            await dir.create(recursive: true);
-          }
-        }
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text("Unzipped to $targetDir")));
-        _listFiles();
-      }
+      await ZipFile.extractToDirectory(
+          zipFile: zipFile, destinationDir: destinationDir);
+      _listFiles();
     } catch (e) {
-      print("Error unzipping: $e");
+      print(e);
     }
   }
 
