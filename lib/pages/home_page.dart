@@ -1,10 +1,12 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:path/path.dart' as path;
 import 'package:permission_handler/permission_handler.dart';
 import 'package:device_info_plus/device_info_plus.dart';
-import 'package:archive/archive_io.dart';
+import 'package:archive/archive_io.dart' hide ZipFile;
 import 'package:open_file/open_file.dart';
+import 'package:raw_file_manager/widgets/expressive_refresh.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:file_picker/file_picker.dart';
 import '../widgets/file_search_delegate.dart';
@@ -12,10 +14,19 @@ import '../services/deletion_service.dart';
 import '../utils/file_utils.dart';
 import 'file_editor_page.dart';
 import 'preview_page.dart';
+import 'package:flutter_archive/flutter_archive.dart';
 import 'text_preview_page.dart';
 import 'secure_file_preview_page.dart';
+import 'package:raw_file_manager/widgets/widgets.dart';
+import 'package:material_shapes/material_shapes.dart';
+import 'package:flutter_staggered_animations/flutter_staggered_animations.dart';
 
-enum SortOption { name, date, size, type }
+enum SortOption {
+  type,
+  name,
+  date,
+  size,
+}
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -23,17 +34,65 @@ class HomePage extends StatefulWidget {
   HomePageState createState() => HomePageState();
 }
 
-class HomePageState extends State<HomePage> {
+class HomePageState extends State<HomePage> with TickerProviderStateMixin {
+  static const MethodChannel _channel =
+      MethodChannel('com.jara.manager.raw_file_manager/apk_install');
+
   String currentPath = "/storage/emulated/0";
   List<FileSystemEntity> files = [];
   bool isGridView = false;
-  SortOption currentSortOption = SortOption.name;
+  SortOption currentSortOption = SortOption.type;
   String searchQuery = '';
 
   bool _isMultiSelect = false;
   final Set<FileSystemEntity> _selectedFiles = {};
+  final Set<FileSystemEntity> _selectedActionFiles = {};
 
   DateTime? _lastBackPressed;
+
+  int _listAnimationKey = 0;
+
+  bool _isCopying = false;
+  bool _isMoving = false;
+  late FileSystemEntity _globalTempEntity;
+
+  // Flutter仅负责调用原生方法，传递APK路径
+  Future<void> installApk(String apkPath) async {
+    try {
+      // 第一步：先接收为dynamic，避免直接强转
+      final dynamic resultData = await _channel.invokeMethod(
+        'installApk',
+        {'apkPath': apkPath},
+      );
+
+      // 第二步：安全转换为Map<String, dynamic>
+      final Map<String, dynamic> result = Map<String, dynamic>.from(resultData);
+
+      // 仅提示结果（无需处理权限，因为已精简）
+      if (mounted) {}
+    } on PlatformException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+              content: Text('调用失败：${e.message}'), backgroundColor: Colors.red),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('类型转换错误：$e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
+  void _moveOrCopyItem({required bool isMove, FileSystemEntity? entity}) {
+    setState(() {
+      _isCopying = true;
+      _isMoving = isMove;
+      if (entity != null) _selectedActionFiles.add(entity);
+    });
+  }
 
   @override
   void initState() {
@@ -61,8 +120,8 @@ class HomePageState extends State<HomePage> {
             context: context,
             builder: (context) => AlertDialog(
               title: const Text("Media Permissions Required"),
-              content: const Text(
-                  "This app requires access to your images, videos, "
+              content:
+                  const Text("This app requires access to your images, videos, "
                       "and audio files. Please grant these permissions."),
               actions: [
                 TextButton(
@@ -110,8 +169,7 @@ class HomePageState extends State<HomePage> {
         }
       }
 
-      final manageStatus =
-      await Permission.manageExternalStorage.request();
+      final manageStatus = await Permission.manageExternalStorage.request();
       if (manageStatus.isDenied) {
         await showDialog(
           context: context,
@@ -167,30 +225,31 @@ class HomePageState extends State<HomePage> {
     if (searchQuery.isNotEmpty) {
       entities = entities
           .where((entity) => path
-          .basename(entity.path)
-          .toLowerCase()
-          .contains(searchQuery.toLowerCase()))
+              .basename(entity.path)
+              .toLowerCase()
+              .contains(searchQuery.toLowerCase()))
           .toList();
     }
     entities.sort((a, b) {
-      switch (currentSortOption) {
-        case SortOption.name:
-          return path.basename(a.path).toLowerCase().compareTo(
-              path.basename(b.path).toLowerCase());
-        case SortOption.date:
-          return a.statSync().modified.compareTo(b.statSync().modified);
-        case SortOption.size:
-          int aSize = a is File ? a.statSync().size : 0;
-          int bSize = b is File ? b.statSync().size : 0;
-          return aSize.compareTo(bSize);
-        case SortOption.type:
-          return path.extension(a.path).compareTo(path.extension(b.path));
-        default:
-          return 0;
+      // 首先区分文件夹和文件，文件夹排在前面
+      bool aIsDir = a is Directory;
+      bool bIsDir = b is Directory;
+
+      if (aIsDir && !bIsDir) {
+        return -1; // a是文件夹，b是文件，a排在前面
+      } else if (!aIsDir && bIsDir) {
+        return 1; // a是文件，b是文件夹，b排在前面
+      } else {
+        // 同为文件夹或同为文件时，按名称排序（不区分大小写）
+        return path
+            .basename(a.path)
+            .toLowerCase()
+            .compareTo(path.basename(b.path).toLowerCase());
       }
     });
     setState(() {
       files = entities;
+      _listAnimationKey++;
     });
   }
 
@@ -203,8 +262,8 @@ class HomePageState extends State<HomePage> {
           title: const Text("Restricted Folder"),
           content: const Text(
               "Direct access to the Android/data (or obb) folder is restricted"
-                  " by the system. Please select the specific subfolder for "
-                  "the app you want to access (e.g., com.tencent.ig)."),
+              " by the system. Please select the specific subfolder for "
+              "the app you want to access (e.g., com.tencent.ig)."),
           actions: <Widget>[
             TextButton(
               onPressed: () => Navigator.of(context).pop(true),
@@ -247,15 +306,147 @@ class HomePageState extends State<HomePage> {
     );
   }
 
+  void _showFileOperationMenu(
+      BuildContext context,
+      dynamic entity,
+      double buttonX, // 按钮的X坐标
+      double buttonY // 按钮的Y坐标
+      ) {
+    // 构建菜单项（完全不变，极简写法）
+    List<PopupMenuEntry<String>> menuItems = [
+      const PopupMenuItem<String>(
+          value: 'copy',
+          child: Padding(
+            padding: EdgeInsets.all(4),
+            child: Row(children: [
+              Icon(Icons.copy, size: 20),
+              SizedBox(width: 12),
+              Text('Copy')
+            ]),
+          )),
+      const PopupMenuItem<String>(
+          value: 'cut',
+          child: Padding(
+            padding: EdgeInsets.all(4),
+            child: Row(children: [
+              Icon(Icons.cut, size: 20),
+              SizedBox(width: 12),
+              Text('Cut')
+            ]),
+          )),
+      const PopupMenuItem<String>(
+          value: 'rename',
+          child: Padding(
+            padding: EdgeInsets.all(4),
+            child: Row(children: [
+              Icon(Icons.edit, size: 20),
+              SizedBox(width: 12),
+              Text('Rename')
+            ]),
+          )),
+    ];
+
+    if (entity is File &&
+        ['.txt', '.md', '.json', '.xml']
+            .contains(path.extension(entity.path).toLowerCase())) {
+      menuItems.add(const PopupMenuItem<String>(
+          value: 'edit_file',
+          child: Padding(
+            padding: EdgeInsets.all(4),
+            child: Row(children: [
+              Icon(Icons.edit_note, size: 20),
+              SizedBox(width: 12),
+              Text('Edit File')
+            ]),
+          )));
+    }
+
+    menuItems.addAll([
+      const PopupMenuItem<String>(
+          value: 'delete',
+          child: Padding(
+            padding: EdgeInsets.all(4),
+            child: Row(children: [
+              Icon(Icons.delete, size: 20),
+              SizedBox(width: 12),
+              Text('Delete')
+            ]),
+          )),
+      const PopupMenuItem<String>(
+          value: 'share',
+          child: Padding(
+            padding: EdgeInsets.all(4),
+            child: Row(children: [
+              Icon(Icons.share, size: 20),
+              SizedBox(width: 12),
+              Text('Share')
+            ]),
+          )),
+      const PopupMenuItem<String>(
+          value: 'zip_unzip',
+          child: Padding(
+            padding: EdgeInsets.all(4),
+            child: Row(children: [
+              Icon(Icons.archive, size: 20),
+              SizedBox(width: 12),
+              Text('Zip/Unzip')
+            ]),
+          )),
+    ]);
+
+    showMenu<String>(
+      context: context,
+      position: RelativeRect.fromLTRB(
+        buttonX + 40,
+        buttonY + 40,
+        MediaQuery.of(context).size.width - (buttonX + 40),
+        MediaQuery.of(context).size.height - (buttonY + 40),
+      ),
+      items: menuItems,
+      color: Theme.of(context).colorScheme.surfaceContainerLow,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.all(Radius.circular(24))),
+      clipBehavior: Clip.antiAlias,
+      popUpAnimationStyle: const AnimationStyle(
+        duration: Duration(milliseconds: 400),
+        curve: Curves.decelerate,
+        reverseCurve: Curves.decelerate,
+      ),
+    ).then((value) {
+      if (value == null) return;
+      switch (value) {
+        case 'copy':
+          _moveOrCopyItem(isMove: false, entity: entity);
+          break;
+        case 'cut':
+          _moveOrCopyItem(isMove: true, entity: entity);
+          break;
+        case 'rename':
+          _renameEntity(entity);
+          break;
+        case 'edit_file':
+          _editFileContent(entity);
+          break;
+        case 'delete':
+          _deleteEntity(entity);
+          break;
+        case 'share':
+          _shareEntity(entity);
+          break;
+        case 'zip_unzip':
+          _zipUnzipEntity(entity);
+          break;
+      }
+    });
+  }
+
   void _navigateTo(FileSystemEntity entity) {
     if (_isMultiSelect) {
       _toggleSelection(entity);
       return;
     }
     if (entity is Directory) {
-      setState(() {
-        currentPath = entity.path;
-      });
+      currentPath = entity.path;
       _listFiles();
     } else {
       _openFile(entity);
@@ -265,12 +456,7 @@ class HomePageState extends State<HomePage> {
   Future<void> _openFile(FileSystemEntity entity) async {
     if (entity is File) {
       String ext = path.extension(entity.path).toLowerCase();
-      if (['.jpg', '.png', '.jpeg', '.gif', '.bmp'].contains(ext)) {
-        Navigator.push(
-          context,
-          MaterialPageRoute(builder: (_) => PreviewPage(file: entity)),
-        );
-      } else if (['.txt', '.md', '.json', '.xml'].contains(ext)) {
+      if (['.txt', '.md', '.json', '.xml'].contains(ext)) {
         if (currentPath.contains("SecureFolder")) {
           Navigator.push(
             context,
@@ -280,10 +466,11 @@ class HomePageState extends State<HomePage> {
         } else {
           Navigator.push(
             context,
-            MaterialPageRoute(
-                builder: (_) => TextPreviewPage(file: entity)),
+            MaterialPageRoute(builder: (_) => TextPreviewPage(file: entity)),
           );
         }
+      } else if ([".apk"].contains(ext)) {
+        installApk(entity.path);
       } else {
         OpenFile.open(entity.path);
       }
@@ -306,32 +493,58 @@ class HomePageState extends State<HomePage> {
     return Icons.insert_drive_file;
   }
 
-  void _onLongPress(FileSystemEntity entity) {
+  void _onLongPress(FileSystemEntity entity, TapDownDetails details) {
     if (_isMultiSelect) {
       _toggleSelection(entity);
       return;
     }
-    showModalBottomSheet(
+
+    _showFileOperationMenu(
+        context, entity, details.globalPosition.dx, details.globalPosition.dy);
+    /*showModalBottomSheet(
+      isScrollControlled: true,
+      showDragHandle: true,
       context: context,
       builder: (context) {
         List<Widget> options = [
           ListTile(
+            shape: const RoundedRectangleBorder(
+                borderRadius: BorderRadius.only(
+                    topLeft: Radius.circular(24),
+                    topRight: Radius.circular(24),
+                    bottomLeft: Radius.circular(4),
+                    bottomRight: Radius.circular(4))),
+            tileColor: Theme.of(context).colorScheme.surfaceContainerLowest,
             leading: const Icon(Icons.copy),
             title: const Text('Copy'),
             onTap: () {
               Navigator.pop(context);
-              _copyEntity(entity);
+              //_copyEntity(entity);
+              _moveOrCopyItem(isMove: false, entity: entity);
             },
           ),
+          const SizedBox(
+            height: 2,
+          ),
           ListTile(
-            leading: const Icon(Icons.drive_file_move),
-            title: const Text('Move'),
+            shape: const RoundedRectangleBorder(
+                borderRadius: BorderRadius.all(Radius.circular(4))),
+            tileColor: Theme.of(context).colorScheme.surfaceContainerLowest,
+            leading: const Icon(Icons.cut),
+            title: const Text('Cut'),
             onTap: () {
               Navigator.pop(context);
-              _moveEntity(entity);
+              //_moveEntity(entity);
+              _moveOrCopyItem(isMove: true, entity: entity);
             },
           ),
+          const SizedBox(
+            height: 2,
+          ),
           ListTile(
+            shape: const RoundedRectangleBorder(
+                borderRadius: BorderRadius.all(Radius.circular(4))),
+            tileColor: Theme.of(context).colorScheme.surfaceContainerLowest,
             leading: const Icon(Icons.edit),
             title: const Text('Rename'),
             onTap: () {
@@ -339,12 +552,18 @@ class HomePageState extends State<HomePage> {
               _renameEntity(entity);
             },
           ),
+          const SizedBox(
+            height: 2,
+          ),
         ];
         if (entity is File &&
             ['.txt', '.md', '.json', '.xml']
                 .contains(path.extension(entity.path).toLowerCase())) {
-          options.add(
+          options.addAll([
             ListTile(
+              shape: const RoundedRectangleBorder(
+                  borderRadius: BorderRadius.all(Radius.circular(4))),
+              tileColor: Theme.of(context).colorScheme.surfaceContainerLowest,
               leading: const Icon(Icons.edit_note),
               title: const Text('Edit File'),
               onTap: () {
@@ -352,10 +571,16 @@ class HomePageState extends State<HomePage> {
                 _editFileContent(entity);
               },
             ),
-          );
+            const SizedBox(
+              height: 2,
+            ),
+          ]);
         }
         options.addAll([
           ListTile(
+            shape: const RoundedRectangleBorder(
+                borderRadius: BorderRadius.all(Radius.circular(4))),
+            tileColor: Theme.of(context).colorScheme.surfaceContainerLowest,
             leading: const Icon(Icons.delete),
             title: const Text('Delete'),
             onTap: () {
@@ -363,7 +588,13 @@ class HomePageState extends State<HomePage> {
               _deleteEntity(entity);
             },
           ),
+          const SizedBox(
+            height: 2,
+          ),
           ListTile(
+            shape: const RoundedRectangleBorder(
+                borderRadius: BorderRadius.all(Radius.circular(4))),
+            tileColor: Theme.of(context).colorScheme.surfaceContainerLowest,
             leading: const Icon(Icons.share),
             title: const Text('Share'),
             onTap: () {
@@ -371,7 +602,17 @@ class HomePageState extends State<HomePage> {
               _shareEntity(entity);
             },
           ),
+          const SizedBox(
+            height: 2,
+          ),
           ListTile(
+            shape: const RoundedRectangleBorder(
+                borderRadius: BorderRadius.only(
+                    topLeft: Radius.circular(4),
+                    topRight: Radius.circular(4),
+                    bottomLeft: Radius.circular(24),
+                    bottomRight: Radius.circular(24))),
+            tileColor: Theme.of(context).colorScheme.surfaceContainerLowest,
             leading: const Icon(Icons.archive),
             title: const Text('Zip/Unzip'),
             onTap: () {
@@ -380,9 +621,16 @@ class HomePageState extends State<HomePage> {
             },
           ),
         ]);
-        return Wrap(children: options);
+        return Container(
+          height: MediaQuery.of(context).size.height * 0.65,
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: options,
+          ),
+        );
       },
-    );
+    );*/
   }
 
   void _toggleSelection(FileSystemEntity entity) {
@@ -409,12 +657,18 @@ class HomePageState extends State<HomePage> {
         bool moveOrPermanent = false; // false: move to bin, true: permanent
         return StatefulBuilder(builder: (context, setState) {
           return AlertDialog(
-            title: const Text("Confirm Deletion"),
+            title: const Text("Delete file(s)"),
             content: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Text("Delete file(s)"),
                 RadioListTile<bool>(
+                  shape: const RoundedRectangleBorder(
+                      borderRadius: BorderRadius.only(
+                          topLeft: Radius.circular(24),
+                          topRight: Radius.circular(24),
+                          bottomLeft: Radius.circular(4),
+                          bottomRight: Radius.circular(4))),
+                  tileColor: Theme.of(context).colorScheme.surfaceContainerLow,
                   title: const Text("Move to Recycle Bin"),
                   value: false,
                   groupValue: moveOrPermanent,
@@ -422,7 +676,17 @@ class HomePageState extends State<HomePage> {
                     setState(() => moveOrPermanent = value!);
                   },
                 ),
+                const SizedBox(
+                  height: 2,
+                ),
                 RadioListTile<bool>(
+                  shape: const RoundedRectangleBorder(
+                      borderRadius: BorderRadius.only(
+                          topLeft: Radius.circular(4),
+                          topRight: Radius.circular(4),
+                          bottomLeft: Radius.circular(24),
+                          bottomRight: Radius.circular(24))),
+                  tileColor: Theme.of(context).colorScheme.surfaceContainerLow,
                   title: const Text("Delete Permanently"),
                   value: true,
                   groupValue: moveOrPermanent,
@@ -433,14 +697,18 @@ class HomePageState extends State<HomePage> {
               ],
             ),
             actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context, null),
-                child: const Text("Cancel"),
+              IntrinsicWidth(
+                child: ExpressiveOutlinedButton(
+                  onPressed: () => Navigator.pop(context, null),
+                  child: const Text("Cancel"),
+                ),
               ),
-              TextButton(
-                onPressed: () => Navigator.pop(context, moveOrPermanent),
-                child: const Text("Yes"),
-              ),
+              IntrinsicWidth(
+                child: ExpressiveFilledButton(
+                  onPressed: () => Navigator.pop(context, moveOrPermanent),
+                  child: const Text("Confirm"),
+                ),
+              )
             ],
           );
         });
@@ -461,8 +729,8 @@ class HomePageState extends State<HomePage> {
           await File(entity.path).delete();
         }
       } else {
-        String recycleBinPath = path.join(
-            "/storage/emulated/0", "RawFileManager", "RecycleBin");
+        String recycleBinPath =
+            path.join("/storage/emulated/0", "RawFileManager", "RecycleBin");
         Directory recycleDir = Directory(recycleBinPath);
         if (!(await recycleDir.exists())) {
           await recycleDir.create(recursive: true);
@@ -480,8 +748,7 @@ class HomePageState extends State<HomePage> {
     if (_selectedFiles.isEmpty) return;
     bool? permanent = await _showDeletionConfirmation();
     if (permanent == null) return;
-    List<String> paths =
-    _selectedFiles.map((entity) => entity.path).toList();
+    List<String> paths = _selectedFiles.map((entity) => entity.path).toList();
     await bulkDeleteFiles(paths, permanent);
     _toggleMultiSelect();
     _listFiles();
@@ -518,8 +785,7 @@ class HomePageState extends State<HomePage> {
   }
 
   Future<void> _renameEntity(FileSystemEntity entity) async {
-    String? newName =
-    await _showInputDialog("Rename", "Enter new name:");
+    String? newName = await _showInputDialog("Rename", "Enter new name:");
     if (newName != null && newName.isNotEmpty) {
       try {
         String newPath = path.join(path.dirname(entity.path), newName);
@@ -536,8 +802,7 @@ class HomePageState extends State<HomePage> {
       if (entity is File) {
         XFile xfile = XFile(entity.path);
         await Share.shareXFiles([xfile],
-            subject: "Sharing File",
-            text: "File shared from Raw File Manager");
+            subject: "Sharing File", text: "File shared from Raw File Manager");
       }
     } catch (e) {
       print("Error sharing file: $e");
@@ -558,13 +823,12 @@ class HomePageState extends State<HomePage> {
       context: context,
       builder: (context) {
         TextEditingController controller =
-        TextEditingController(text: defaultName);
+            TextEditingController(text: defaultName);
         return AlertDialog(
           title: const Text("Enter zip file name"),
           content: TextField(
             controller: controller,
-            decoration:
-            const InputDecoration(hintText: "Zip file name"),
+            decoration: const InputDecoration(hintText: "Zip file name"),
           ),
           actions: [
             TextButton(
@@ -572,8 +836,7 @@ class HomePageState extends State<HomePage> {
               child: const Text("Cancel"),
             ),
             TextButton(
-              onPressed: () =>
-                  Navigator.pop(context, controller.text),
+              onPressed: () => Navigator.pop(context, controller.text),
               child: const Text("OK"),
             ),
           ],
@@ -583,53 +846,90 @@ class HomePageState extends State<HomePage> {
   }
 
   Future<void> _zipFileOrFolder(FileSystemEntity entity) async {
-    try {
-      String defaultName = path.basename(entity.path);
-      String? enteredName = await _askZipName(defaultName);
-      if (enteredName == null || enteredName.trim().isEmpty) {
-        enteredName = defaultName;
+    // try {
+    //   String defaultName = path.basename(entity.path);
+    //   String? enteredName = await _askZipName(defaultName);
+    //   if (enteredName == null || enteredName.trim().isEmpty) {
+    //     enteredName = defaultName;
+    //   }
+    //   String zipPath = path.join(path.dirname(entity.path), "$enteredName.zip");
+    //   var encoder = ZipFileEncoder();
+    //   encoder.create(zipPath);
+    //   if (entity is File) {
+    //     encoder.addFile(entity);
+    //   } else if (entity is Directory) {
+    //     encoder.addDirectory(entity);
+    //   }
+    //   encoder.close();
+    //   ScaffoldMessenger.of(context)
+    //       .showSnackBar(SnackBar(content: Text("Created zip at $zipPath")));
+    //   _listFiles();
+    // } catch (e) {
+    //   print("Error zipping: $e");
+    // }
+
+    String defaultName = path.basename(entity.path);
+    String? enteredName = await _askZipName(defaultName);
+    if (enteredName == null || enteredName.trim().isEmpty) {
+      enteredName = defaultName;
+    }
+
+    if (entity is File) {
+      final dataDir = Directory(entity.parent.path);
+      final zipFile = File(path.join(entity.parent.path, "$enteredName.zip"));
+      final files = [File(entity.path)];
+      try {
+        ZipFile.createFromFiles(
+            sourceDir: dataDir, files: files, zipFile: zipFile);
+      } catch (e) {
+        print(e);
       }
-      String zipPath =
-      path.join(path.dirname(entity.path), "$enteredName.zip");
-      var encoder = ZipFileEncoder();
-      encoder.create(zipPath);
-      if (entity is File) {
-        encoder.addFile(entity);
-      } else if (entity is Directory) {
-        encoder.addDirectory(entity);
+    } else if (entity is Directory) {
+      final dataDir = Directory(entity.path);
+      try {
+        final zipFile = File(path.join(entity.path, "$enteredName.zip"));
+        await ZipFile.createFromDirectory(
+            sourceDir: dataDir, zipFile: zipFile, recurseSubDirs: true);
+        _listFiles();
+      } catch (e) {
+        print(e);
       }
-      encoder.close();
-      ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Created zip at $zipPath")));
-      _listFiles();
-    } catch (e) {
-      print("Error zipping: $e");
     }
   }
 
   Future<void> _unzipFile(FileSystemEntity entity) async {
+    // try {
+    //   if (entity is File) {
+    //     String targetDir = entity.parent.path;
+    //     List<int> bytes = await entity.readAsBytes();
+    //     Archive archive = ZipDecoder().decodeBytes(bytes);
+    //     for (var file in archive) {
+    //       String filename = path.join(targetDir, file.name);
+    //       if (file.isFile) {
+    //         File outFile = File(filename);
+    //         await outFile.create(recursive: true);
+    //         await outFile.writeAsBytes(file.content as List<int>);
+    //       } else {
+    //         Directory dir = Directory(filename);
+    //         await dir.create(recursive: true);
+    //       }
+    //     }
+    //     ScaffoldMessenger.of(context)
+    //         .showSnackBar(SnackBar(content: Text("Unzipped to $targetDir")));
+    //     _listFiles();
+    //   }
+    // } catch (e) {
+    //   print("Error unzipping: $e");
+    // }
+
+    final zipFile = File(entity.path);
+    final destinationDir = Directory(entity.parent.path);
     try {
-      if (entity is File) {
-        String targetDir = entity.parent.path;
-        List<int> bytes = await entity.readAsBytes();
-        Archive archive = ZipDecoder().decodeBytes(bytes);
-        for (var file in archive) {
-          String filename = path.join(targetDir, file.name);
-          if (file.isFile) {
-            File outFile = File(filename);
-            await outFile.create(recursive: true);
-            await outFile.writeAsBytes(file.content as List<int>);
-          } else {
-            Directory dir = Directory(filename);
-            await dir.create(recursive: true);
-          }
-        }
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text("Unzipped to $targetDir")));
-        _listFiles();
-      }
+      await ZipFile.extractToDirectory(
+          zipFile: zipFile, destinationDir: destinationDir);
+      _listFiles();
     } catch (e) {
-      print("Error unzipping: $e");
+      print(e);
     }
   }
 
@@ -641,20 +941,27 @@ class HomePageState extends State<HomePage> {
         return AlertDialog(
           title: Text(title),
           content: TextField(
-            decoration: InputDecoration(hintText: hint),
+            decoration: InputDecoration(
+              border: const OutlineInputBorder(),
+              hintText: hint,
+            ),
             onChanged: (value) {
               userInput = value;
             },
           ),
           actions: [
-            TextButton(
-              child: const Text("Cancel"),
-              onPressed: () => Navigator.pop(context),
+            IntrinsicWidth(
+              child: ExpressiveOutlinedButton(
+                child: const Text("Cancel"),
+                onPressed: () => Navigator.pop(context),
+              ),
             ),
-            TextButton(
-              child: const Text("OK"),
-              onPressed: () => Navigator.pop(context, userInput),
-            ),
+            IntrinsicWidth(
+              child: ExpressiveFilledButton(
+                child: const Text("OK"),
+                onPressed: () => Navigator.pop(context, userInput),
+              ),
+            )
           ],
         );
       },
@@ -706,8 +1013,8 @@ class HomePageState extends State<HomePage> {
   }
 
   Future<void> _createNewFile() async {
-    String? fileName = await _showInputDialog(
-        "New File", "Enter file name (with extension):");
+    String? fileName =
+        await _showInputDialog("New File", "Enter file name (with extension):");
     if (fileName != null && fileName.isNotEmpty) {
       try {
         String newPath = path.join(currentPath, fileName);
@@ -723,7 +1030,7 @@ class HomePageState extends State<HomePage> {
 
   Future<void> _createNewFolder() async {
     String? folderName =
-    await _showInputDialog("New Folder", "Enter folder name:");
+        await _showInputDialog("New Folder", "Enter folder name:");
     if (folderName != null && folderName.isNotEmpty) {
       try {
         String newPath = path.join(currentPath, folderName);
@@ -747,229 +1054,696 @@ class HomePageState extends State<HomePage> {
     });
   }
 
+  // 解析当前路径为层级列表
+  List<String> _getPathSegments() {
+    List<String> segments = path.split(currentPath);
+    // 过滤空字符串（处理路径开头/结尾的分隔符）
+    segments = segments.where((s) => s.isNotEmpty).toList();
+    return segments;
+  }
+
+// 跳转到指定层级的路径
+  void _navigateToPathSegment(int index) {
+    List<String> segments = _getPathSegments();
+    if (index < 0 || index >= segments.length) return;
+
+    // 拼接选中层级的完整路径
+    String targetPath = "/" + segments.sublist(0, index + 1).join("/");
+    // 特殊处理Android根目录格式
+    if (targetPath == "/storage/emulated/0") {
+      targetPath = "/storage/emulated/0";
+    }
+
+    setState(() {
+      currentPath = targetPath;
+    });
+    _listFiles();
+  }
+
+  List<Widget> _buildPathIndicator() {
+    List<String> segments = _getPathSegments();
+    List<Widget> widgets = [];
+
+    // 处理根目录（第一个层级）
+    for (int i = 0; i < segments.length; i++) {
+      String segment = segments[i];
+      // 特殊显示根目录名称
+      String displayName = segment;
+      if (i == 0 && segment == "storage") {
+        displayName = "Storage";
+      } else if (i == 2 && segment == "0") {
+        displayName = "Internal Storage";
+      }
+
+      // 添加层级文本按钮
+      widgets.add(
+        InkWell(
+            borderRadius: const BorderRadius.all(Radius.circular(128)),
+            onTap: () => _navigateToPathSegment(i),
+            child: Padding(
+              padding: const EdgeInsets.all(8),
+              child: Text(
+                displayName,
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.primary,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            )),
+      );
+
+      // 添加分隔符（最后一个层级不显示）
+      if (i != segments.length - 1) {
+        widgets.add(
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            child: Icon(
+              Icons.chevron_right,
+              size: 16,
+              color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
+            ),
+          ),
+        );
+      }
+    }
+
+    return widgets;
+  }
+
+  bool _canSystemPop = false;
+
   @override
   Widget build(BuildContext context) {
-    return WillPopScope(
-      onWillPop: () async {
-        // If not at the starting path, navigate to the parent directory.
-        if (currentPath != "/storage/emulated/0") {
-          setState(() {
-            currentPath = Directory(currentPath).parent.path;
-          });
-          _listFiles();
-          return false;
-        }
-        // If at the starting path, require a double-tap back to exit.
-        DateTime now = DateTime.now();
-        if (_lastBackPressed == null ||
-            now.difference(_lastBackPressed!) > const Duration(seconds: 2)) {
-          _lastBackPressed = now;
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text("Press back again to exit the app")),
-          );
-          return false;
-        }
-        return true;
-      },
-      child: Scaffold(
-        appBar: AppBar(
-          title: !_isMultiSelect
-              ? const Text('Raw File Manager')
-              : Text('${_selectedFiles.length} Selected'),
-          actions: [
-            if (!_isMultiSelect)
-              IconButton(
+    return OrientationBuilder(builder: (context, orientation) {
+      // 判断是否为横屏
+      bool isLandscape = orientation == Orientation.landscape;
+
+      return PopScope(
+        // 核心：通过 canPop 控制是否允许系统执行默认返回
+        // 非根目录时：设为 false，阻止系统返回，优先执行业务逻辑
+        // 根目录时：设为 true，允许系统返回（但双击才真退出）
+        canPop: _canSystemPop,
+        onPopInvoked: (didPop) async {
+          if (didPop) return; // 系统已处理，直接返回
+
+          // 1. 非根目录：优先返回上一级目录，阻止系统退回桌面
+          if (currentPath != "/storage/emulated/0") {
+            setState(() {
+              currentPath = Directory(currentPath).parent.path;
+            });
+            await _listFiles();
+            return;
+          }
+
+          // 2. 根目录：处理双击退出逻辑
+          DateTime now = DateTime.now();
+          if (_lastBackPressed == null ||
+              now.difference(_lastBackPressed!) > const Duration(seconds: 2)) {
+            _lastBackPressed = now;
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text("Press back again to exit the app"),
+                duration: Duration(seconds: 2),
+              ),
+            );
+            // 第一次点击：仍阻止系统返回
+            setState(() => _canSystemPop = false);
+            return;
+          }
+
+          // 3. 双击确认退出：允许系统返回
+          setState(() => _canSystemPop = true);
+          // 主动触发系统返回（退出App）
+          Navigator.of(context).pop();
+        },
+        child: Scaffold(
+          appBar: AppBar(
+            leading: isLandscape ? null : const SizedBox(),
+            surfaceTintColor: Theme.of(context).colorScheme.surface,
+            bottomOpacity: 1,
+            bottom: PreferredSize(
+              preferredSize: const Size(double.infinity, 48),
+              child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                child: SingleChildScrollView(
+                  reverse: true,
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    mainAxisAlignment: MainAxisAlignment.start,
+                    children: _buildPathIndicator(),
+                  ),
+                ),
+              ),
+            ),
+            backgroundColor: Theme.of(context).colorScheme.surface,
+            title: !_isMultiSelect
+                ? const Text('Files')
+                : Text('${_selectedFiles.length} Selected'),
+            actions: [
+              /*if (!_isMultiSelect)
+              IconButton.filledTonal(
                 icon: const Icon(Icons.add_box),
                 onPressed: _showAddOptions,
-              ),
-            if (!_isMultiSelect)
-              IconButton(
-                icon: const Icon(Icons.search),
-                onPressed: () {
-                  showSearch(
-                    context: context,
-                    delegate: FileSearchDelegate(
-                        onSearch: _onSearch, initialFiles: files),
-                  );
-                },
-              ),
-            if (!_isMultiSelect)
+              ),*/
+              if (!_isMultiSelect)
+                IntrinsicHeight(
+                  child: ExpressiveFilledButton(
+                    child: const Icon(Icons.search),
+                    onPressed: () {
+                      showSearch(
+                        context: context,
+                        delegate: FileSearchDelegate(
+                            onSearch: _onSearch, initialFiles: files),
+                      );
+                    },
+                  ),
+                ),
+              /*if (!_isMultiSelect)
               PopupMenuButton<SortOption>(
                 onSelected: _changeSortOption,
                 icon: const Icon(Icons.sort),
                 itemBuilder: (context) => [
                   const PopupMenuItem(
-                      value: SortOption.name,
-                      child: Text("Sort by Name")),
+                      value: SortOption.name, child: Text("Sort by Name")),
                   const PopupMenuItem(
-                      value: SortOption.date,
-                      child: Text("Sort by Date")),
+                      value: SortOption.date, child: Text("Sort by Date")),
                   const PopupMenuItem(
-                      value: SortOption.size,
-                      child: Text("Sort by Size")),
+                      value: SortOption.size, child: Text("Sort by Size")),
                   const PopupMenuItem(
-                      value: SortOption.type,
-                      child: Text("Sort by Type")),
+                      value: SortOption.type, child: Text("Sort by Type")),
                 ],
+              ),*/
+              if (_isMultiSelect && !_isCopying && !_isMoving) ...[
+                const SizedBox(
+                  width: 4,
+                ),
+                IntrinsicHeight(
+                  child: ExpressiveFilledButton(
+                    backgroundColor:
+                        Theme.of(context).colorScheme.primaryContainer,
+                    foregroundColor:
+                        Theme.of(context).colorScheme.onPrimaryContainer,
+                    child: const Icon(Icons.copy),
+                    onPressed: () {
+                      setState(() {
+                        _isCopying = true;
+                        _isMoving = false;
+                        _selectedActionFiles.addAll(_selectedFiles);
+                        _isMultiSelect = false;
+                        _selectedFiles.clear();
+                      });
+                    },
+                  ),
+                ),
+                const SizedBox(
+                  width: 4,
+                ),
+                IntrinsicHeight(
+                  child: ExpressiveFilledButton(
+                    backgroundColor:
+                        Theme.of(context).colorScheme.primaryContainer,
+                    foregroundColor:
+                        Theme.of(context).colorScheme.onPrimaryContainer,
+                    child: const Icon(Icons.cut),
+                    onPressed: () {
+                      setState(() {
+                        _isCopying = true;
+                        _isMoving = true;
+                        _selectedActionFiles.addAll(_selectedFiles);
+                        _isMultiSelect = false;
+                        _selectedFiles.clear();
+                      });
+                    },
+                  ),
+                ),
+                const SizedBox(
+                  width: 4,
+                ),
+                IntrinsicHeight(
+                  child: ExpressiveFilledButton(
+                    backgroundColor:
+                        Theme.of(context).colorScheme.primaryContainer,
+                    foregroundColor:
+                        Theme.of(context).colorScheme.onPrimaryContainer,
+                    child: const Icon(Icons.delete),
+                    onPressed: () {
+                      _deleteSelectedEntities();
+                    },
+                  ),
+                ),
+              ],
+              const SizedBox(
+                width: 4,
               ),
-            IconButton(
-              icon: Icon(_isMultiSelect ? Icons.clear : Icons.select_all),
-              onPressed: () {
-                if (_isMultiSelect) {
-                  _toggleMultiSelect();
-                } else {
-                  setState(() {
-                    _isMultiSelect = true;
-                  });
-                }
-              },
-            ),
-            IconButton(
-              icon: Icon(isGridView ? Icons.list : Icons.grid_view),
-              onPressed: () {
-                setState(() {
-                  isGridView = !isGridView;
-                });
-              },
-            )
-          ],
-        ),
-        drawer: Drawer(
-          child: ListView(
-            children: [
-              const DrawerHeader(
-                child: Center(
-                  child: Text("Raw File Manager",
-                      style: TextStyle(fontSize: 24)),
+              IntrinsicHeight(
+                child: ExpressiveFilledButton(
+                  backgroundColor:
+                      Theme.of(context).colorScheme.primaryContainer,
+                  foregroundColor:
+                      Theme.of(context).colorScheme.onPrimaryContainer,
+                  onPressed: () {
+                    if (_isMultiSelect) {
+                      _toggleMultiSelect();
+                    } else {
+                      setState(() {
+                        _isMultiSelect = true;
+                      });
+                    }
+                  },
+                  child: Icon(
+                    _isMultiSelect ? Icons.clear : Icons.select_all,
+                  ),
                 ),
               ),
-              ListTile(
-                leading: const Icon(Icons.home),
-                title: const Text("Home"),
+              const SizedBox(
+                width: 4,
+              ),
+              IntrinsicHeight(
+                child: ExpressiveFilledButton(
+                  backgroundColor:
+                      Theme.of(context).colorScheme.tertiaryContainer,
+                  foregroundColor:
+                      Theme.of(context).colorScheme.onTertiaryContainer,
+                  child: Icon(isGridView ? Icons.list : Icons.grid_view),
+                  onPressed: () {
+                    setState(() {
+                      isGridView = !isGridView;
+                    });
+                  },
+                ),
+              ),
+              const SizedBox(
+                width: 16,
+              )
+            ],
+          ),
+          body: ExpressiveRefreshIndicator.contained(
+            onRefresh: _listFiles,
+            child: files.isEmpty
+                ? Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        MaterialShapes.fourLeafClover(
+                            color: Theme.of(context).colorScheme.primary,
+                            size: 96),
+                        const SizedBox(
+                          height: 4,
+                        ),
+                        MaterialShapes.circle(
+                            color:
+                                Theme.of(context).colorScheme.primaryContainer,
+                            size: 24),
+                        const SizedBox(
+                          height: 8,
+                        ),
+                        Text(
+                          "It's empty.",
+                          style: TextStyle(
+                              fontSize: 16,
+                              color:
+                                  Theme.of(context).colorScheme.inverseSurface),
+                        )
+                      ],
+                    ),
+                  )
+                : isGridView
+                    ? GridView.builder(
+                        gridDelegate:
+                            const SliverGridDelegateWithFixedCrossAxisCount(
+                                crossAxisCount: 3),
+                        itemCount: files.length,
+                        itemBuilder: (context, index) {
+                          FileSystemEntity entity = files[index];
+                          bool isSelected = _selectedFiles.contains(entity);
+                          return GestureDetector(
+                            onTap: () => _navigateTo(entity),
+                            child: Card(
+                              child: Stack(
+                                children: [
+                                  Column(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Icon(_getIcon(entity), size: 40),
+                                      const SizedBox(height: 8),
+                                      Text(
+                                        path.basename(entity.path),
+                                        overflow: TextOverflow.ellipsis,
+                                        textAlign: TextAlign.center,
+                                        style: const TextStyle(fontSize: 12),
+                                      ),
+                                    ],
+                                  ),
+                                  if (_isMultiSelect)
+                                    Positioned(
+                                      right: 4,
+                                      top: 4,
+                                      child: Icon(
+                                        isSelected
+                                            ? Icons.check_circle
+                                            : Icons.radio_button_unchecked,
+                                        color: Colors.teal,
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
+                          );
+                        },
+                      )
+                    : AnimationLimiter(
+                        key: ValueKey(_listAnimationKey),
+                        child: ListView.builder(
+                          padding: const EdgeInsets.only(bottom: 84),
+                          itemCount: files.length,
+                          itemBuilder: (context, index) {
+                            FileSystemEntity entity = files[index];
+                            bool isSelected = _selectedFiles.contains(entity);
+
+                            // 定义圆角值常量，方便维护
+                            const double largeRadius = 24.0;
+                            const double smallRadius = 4.0;
+
+                            // 根据索引动态计算圆角
+                            BorderRadius borderRadius;
+                            if (files.length == 1) {
+                              borderRadius = const BorderRadius.all(
+                                  Radius.circular(largeRadius));
+                            } else {
+                              if (index == 0) {
+                                borderRadius = const BorderRadius.only(
+                                  topLeft: Radius.circular(largeRadius),
+                                  topRight: Radius.circular(largeRadius),
+                                  bottomLeft: Radius.circular(smallRadius),
+                                  bottomRight: Radius.circular(smallRadius),
+                                );
+                              } else if (index == files.length - 1) {
+                                borderRadius = const BorderRadius.only(
+                                  topLeft: Radius.circular(smallRadius),
+                                  topRight: Radius.circular(smallRadius),
+                                  bottomLeft: Radius.circular(largeRadius),
+                                  bottomRight: Radius.circular(largeRadius),
+                                );
+                              } else {
+                                borderRadius = const BorderRadius.all(
+                                    Radius.circular(smallRadius));
+                              }
+                            }
+                            return AnimationConfiguration.staggeredList(
+                                position: index,
+                                duration: const Duration(milliseconds: 375),
+                                delay: const Duration(milliseconds: 20),
+                                child: SlideAnimation(
+                                    verticalOffset: 3.0,
+                                    curve: Curves.fastOutSlowIn,
+                                    child: FadeInAnimation(
+                                        curve: Curves.fastOutSlowIn,
+                                        child: Padding(
+                                          padding: const EdgeInsets.only(
+                                              top: 1,
+                                              bottom: 1,
+                                              right: 16,
+                                              left: 16),
+                                          child: ListTile(
+                                            contentPadding:
+                                                const EdgeInsets.symmetric(
+                                                    horizontal: 24.0),
+                                            tileColor: isSelected
+                                                ? Theme.of(context)
+                                                    .colorScheme
+                                                    .secondaryContainer
+                                                : Theme.of(context)
+                                                    .colorScheme
+                                                    .surfaceContainerLowest,
+                                            shape: RoundedRectangleBorder(
+                                                borderRadius: isSelected
+                                                    ? const BorderRadius.all(
+                                                        Radius.circular(128))
+                                                    : borderRadius),
+                                            leading: _isMultiSelect
+                                                ? isSelected
+                                                    ? Icon(
+                                                        Icons.check_circle,
+                                                        color: Theme.of(context)
+                                                            .colorScheme
+                                                            .primary,
+                                                      )
+                                                    : Icon(_getIcon(entity))
+                                                : Icon(_getIcon(entity)),
+                                            title: Text(
+                                                path.basename(entity.path)),
+                                            subtitle: Text(entity is File
+                                                ? "${(entity.statSync().size / 1024).toStringAsFixed(2)} KB"
+                                                : "Folder"),
+                                            trailing: _isMultiSelect
+                                                ? null
+                                                : GestureDetector(
+                                                    // 用onTapDown获取点击位置
+                                                    onTapDown: (TapDownDetails
+                                                        details) {
+                                                      // 传点击位置的X/Y给菜单方法
+                                                      _showFileOperationMenu(
+                                                          context,
+                                                          entity,
+                                                          details.globalPosition
+                                                              .dx, // 点击位置X
+                                                          details.globalPosition
+                                                              .dy // 点击位置Y
+                                                          );
+                                                    },
+                                                    // 保留原onTap（防止误触）
+                                                    onTap: () {},
+                                                    child: const Icon(Icons
+                                                        .more_vert), // 你的原按钮组件
+                                                  ),
+                                            onTap: () {
+                                              _navigateTo(entity);
+                                            },
+                                            onLongPress: () {
+                                              setState(() {
+                                                _isMultiSelect = true;
+                                                _toggleSelection(entity);
+                                              });
+                                            },
+                                          ),
+                                        ))));
+                          },
+                        ),
+                      ),
+          ),
+          floatingActionButton: ExpressiveFloatingActionButton(
+            defaultIcon: Icons.add,
+            backgroundColor: Theme.of(context).colorScheme.primaryContainer,
+            foregroundColor: Theme.of(context).colorScheme.onPrimaryContainer,
+            actionItems: [
+              ActionItem(
+                icon: Icons.file_open,
+                label: 'File',
                 onTap: () {
-                  Navigator.pushNamedAndRemoveUntil(
-                      context, '/', (route) => false);
+                  _createNewFile();
                 },
               ),
-              ListTile(
-                leading: const Icon(Icons.delete),
-                title: const Text("Recycle Bin"),
+              ActionItem(
+                icon: Icons.folder,
+                label: 'Folder',
                 onTap: () {
-                  Navigator.pop(context);
-                  Navigator.pushNamed(context, '/recycle_bin');
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.lock),
-                title: const Text("Secure Folder"),
-                onTap: () {
-                  Navigator.pop(context);
-                  Navigator.pushNamed(context, '/secure_folder');
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.pie_chart),
-                title: const Text("Storage Analyzer"),
-                onTap: () {
-                  Navigator.pop(context);
-                  Navigator.pushNamed(context, '/storage_analyzer');
+                  _createNewFolder();
                 },
               ),
             ],
           ),
-        ),
-        body: RefreshIndicator(
-          onRefresh: _listFiles,
-          child: isGridView
-              ? GridView.builder(
-            gridDelegate:
-            const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 3),
-            itemCount: files.length,
-            itemBuilder: (context, index) {
-              FileSystemEntity entity = files[index];
-              bool isSelected = _selectedFiles.contains(entity);
-              return GestureDetector(
-                onTap: () => _navigateTo(entity),
-                onLongPress: () => _onLongPress(entity),
-                child: Card(
-                  child: Stack(
-                    children: [
-                      Column(
-                        mainAxisAlignment:
-                        MainAxisAlignment.center,
-                        children: [
-                          Icon(_getIcon(entity), size: 40),
-                          const SizedBox(height: 8),
-                          Text(
-                            path.basename(entity.path),
-                            overflow: TextOverflow.ellipsis,
-                            textAlign: TextAlign.center,
-                            style:
-                            const TextStyle(fontSize: 12),
-                          ),
-                        ],
-                      ),
-                      if (_isMultiSelect)
-                        Positioned(
-                          right: 4,
-                          top: 4,
-                          child: Icon(
-                            isSelected
-                                ? Icons.check_circle
-                                : Icons.radio_button_unchecked,
-                            color: Colors.teal,
+          persistentFooterButtons: _isCopying
+              ? [
+                  AnimatedSize(
+                      duration: const Duration(milliseconds: 300),
+                      curve: Curves.fastOutSlowIn,
+                      child: SlideTransition(
+                        position: Tween<Offset>(
+                          begin: const Offset(0, 1),
+                          end: Offset.zero,
+                        ).animate(CurvedAnimation(
+                          parent: AnimationController(
+                            vsync: this,
+                            duration: const Duration(milliseconds: 300),
+                          )..forward(),
+                          curve: Curves.easeInOut,
+                        )),
+                        child: Container(
+                          height: 72,
+                          color: Colors.transparent,
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 0, vertical: 0),
+                            child: Center(
+                              child: Container(
+                                width: MediaQuery.of(context).size.width - 48 <=
+                                        480
+                                    ? MediaQuery.of(context).size.width - 48
+                                    : 480,
+                                height: 72,
+                                decoration: BoxDecoration(
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.black.withOpacity(0.1),
+                                      blurRadius: 10.0,
+                                      spreadRadius: 0.0,
+                                      offset: const Offset(0, 4),
+                                    ),
+                                    BoxShadow(
+                                      color: Colors.black.withOpacity(0.06),
+                                      blurRadius: 16.0,
+                                      spreadRadius: -1.0,
+                                      offset: const Offset(0, 6),
+                                    ),
+                                  ],
+                                  borderRadius: const BorderRadius.all(
+                                      Radius.circular(128)),
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .primaryContainer,
+                                ),
+                                child: Padding(
+                                  padding: const EdgeInsets.all(10),
+                                  child: Row(
+                                    children: [
+                                      SizedBox(
+                                        width: 54,
+                                        child: Container(
+                                          decoration: BoxDecoration(
+                                            borderRadius:
+                                                BorderRadius.circular(48),
+                                            color: Theme.of(context)
+                                                .colorScheme
+                                                .surfaceContainerLowest,
+                                          ),
+                                          child: Center(
+                                            child: Text(
+                                              "${_selectedActionFiles.length}",
+                                              style:
+                                                  const TextStyle(fontSize: 16),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 10),
+                                      Expanded(
+                                        flex: 1,
+                                        child: Material(
+                                          borderRadius:
+                                              BorderRadius.circular(48),
+                                          color: Colors.transparent,
+                                          child: InkWell(
+                                            borderRadius:
+                                                BorderRadius.circular(48),
+                                            onTap: () {
+                                              setState(() {
+                                                _isCopying = false;
+                                                _isMoving = false;
+                                                _selectedActionFiles.clear();
+                                              });
+                                            },
+                                            child: Container(
+                                              decoration: BoxDecoration(
+                                                borderRadius:
+                                                    BorderRadius.circular(48),
+                                              ),
+                                              child: Ink(
+                                                decoration: BoxDecoration(
+                                                  borderRadius:
+                                                      BorderRadius.circular(48),
+                                                  color: Theme.of(context)
+                                                      .colorScheme
+                                                      .surfaceContainerLowest,
+                                                ),
+                                                child: const Center(
+                                                  child: Text(
+                                                    "Cancel",
+                                                    style:
+                                                        TextStyle(fontSize: 16),
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 10),
+                                      Expanded(
+                                        flex: 1,
+                                        child: Material(
+                                          borderRadius:
+                                              BorderRadius.circular(48),
+                                          color: Colors.transparent,
+                                          child: InkWell(
+                                            borderRadius:
+                                                BorderRadius.circular(48),
+                                            onTap: () async {
+                                              try {
+                                                List<String> selectedPaths =
+                                                    _selectedActionFiles
+                                                        .map((entity) =>
+                                                            entity.path)
+                                                        .toList();
+
+                                                await bulkActionFiles(
+                                                  selectedPaths,
+                                                  _isMoving,
+                                                  currentPath,
+                                                  onCompleted: (bool isSuccess,
+                                                      int fileCount) {
+                                                    if (mounted) {
+                                                      _listFiles();
+                                                    }
+                                                  },
+                                                );
+                                              } catch (e) {
+                                                print(e);
+                                              }
+                                              setState(() {
+                                                _isCopying = false;
+                                                _isMoving = false;
+                                                _selectedActionFiles.clear();
+                                              });
+                                            },
+                                            child: Container(
+                                              decoration: BoxDecoration(
+                                                borderRadius:
+                                                    BorderRadius.circular(48),
+                                              ),
+                                              child: Ink(
+                                                decoration: BoxDecoration(
+                                                  borderRadius:
+                                                      BorderRadius.circular(48),
+                                                  color: Theme.of(context)
+                                                      .colorScheme
+                                                      .surfaceContainerLowest,
+                                                ),
+                                                child: const Center(
+                                                  child: Text(
+                                                    "Paste",
+                                                    style:
+                                                        TextStyle(fontSize: 16),
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
                           ),
                         ),
-                    ],
-                  ),
-                ),
-              );
-            },
-          )
-              : ListView.builder(
-            itemCount: files.length,
-            itemBuilder: (context, index) {
-              FileSystemEntity entity = files[index];
-              bool isSelected = _selectedFiles.contains(entity);
-              return ListTile(
-                leading: _isMultiSelect
-                    ? Checkbox(
-                  value: isSelected,
-                  onChanged: (_) => _toggleSelection(entity),
-                )
-                    : Icon(_getIcon(entity)),
-                title: Text(path.basename(entity.path)),
-                subtitle: Text(entity is File
-                    ? "${(entity.statSync().size / 1024).toStringAsFixed(2)} KB"
-                    : "Folder"),
-                trailing: entity is File
-                    ? Text("${entity.statSync().modified}")
-                    : null,
-                onTap: () => _navigateTo(entity),
-                onLongPress: () => _onLongPress(entity),
-              );
-            },
-          ),
+                      )),
+                ]
+              : null,
         ),
-        floatingActionButton: _isMultiSelect
-            ? FloatingActionButton(
-          onPressed: _deleteSelectedEntities,
-          child: const Icon(Icons.delete),
-        )
-            : currentPath != "/storage/emulated/0"
-            ? FloatingActionButton(
-          child: const Icon(Icons.arrow_upward),
-          onPressed: () {
-            setState(() {
-              currentPath =
-                  Directory(currentPath).parent.path;
-            });
-            _listFiles();
-          },
-        )
-            : null,
-      ),
-    );
+      );
+    });
   }
 }

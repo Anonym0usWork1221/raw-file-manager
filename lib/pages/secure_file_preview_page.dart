@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'file_editor_page.dart';
 import 'dart:io';
 
+
 class SecureFilePreviewPage extends StatefulWidget {
   final File file;
   const SecureFilePreviewPage({super.key, required this.file});
@@ -60,6 +61,7 @@ class SecureFilePreviewPageState extends State<SecureFilePreviewPage> {
     String fileName = path.basename(widget.file.path);
     return Scaffold(
       appBar: AppBar(
+        leading: const SizedBox(),
         title: Text("Secure: $fileName"),
         actions: [
           IconButton(

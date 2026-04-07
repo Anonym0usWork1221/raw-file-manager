@@ -27,7 +27,7 @@ class TextPreviewPage extends StatelessWidget {
             return snapshot.hasData
                 ? SingleChildScrollView(
               padding: const EdgeInsets.all(16),
-              child: Text(snapshot.data!),
+              child: SelectableText(snapshot.data!),
             )
                 : const Center(child: Text("No data"));
           } else {
